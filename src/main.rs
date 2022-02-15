@@ -215,7 +215,7 @@ impl From<JsonValue> for FormatElement {
                 let fields_len = fields.len();
                 for (idx, (field_name, field_value)) in fields.into_iter().enumerate() {
                     if idx == 0 {
-                        object_documents.push(Rc::new(line_or_empty()));
+                        object_documents.push(Rc::new(line_or_space()));
                     }
 
                     object_documents.push(Rc::new(text(field_name)));
@@ -231,7 +231,7 @@ impl From<JsonValue> for FormatElement {
                 group(FormatElement::List(vec![
                     Rc::new(literal("{")),
                     Rc::new(nest(2, concat(object_documents))),
-                    Rc::new(line_or_empty()),
+                    Rc::new(line_or_space()),
                     Rc::new(literal("}")),
                 ]))
             }
@@ -242,15 +242,28 @@ impl From<JsonValue> for FormatElement {
 fn main() {
     let document: Rc<FormatElement> = Rc::new(
         JsonValue::Array(vec![
-            JsonValue::Number(10),
-            JsonValue::Number(100),
-            JsonValue::String("The Quick Brown Fox Jumps Over The Lazy Dog".to_string()),
             JsonValue::Object(vec![(
-                "foo".to_string(),
+                "Wong Kar Wai".to_string(),
                 JsonValue::Array(vec![
                     JsonValue::String("Chungking Express".to_string()),
                     JsonValue::String("In the Mood for Love".to_string()),
-                    JsonValue::String("Badlands".to_string()),
+                    JsonValue::String("Happy Together".to_string()),
+                ]),
+            )]),
+            JsonValue::Object(vec![(
+                "Lucrecia Martel".to_string(),
+                JsonValue::Array(vec![
+                    JsonValue::String("La Cienaga".to_string()),
+                    JsonValue::String("A Headless Woman".to_string()),
+                    JsonValue::String("Zama".to_string()),
+                ]),
+            )]),
+            JsonValue::Object(vec![(
+                "Olivier Assayas".to_string(),
+                JsonValue::Array(vec![
+                    JsonValue::String("Summer Hours".to_string()),
+                    JsonValue::String("Irma Vep".to_string()),
+                    JsonValue::String("Clouds of Sils Maria".to_string()),
                 ]),
             )]),
         ])
