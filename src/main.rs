@@ -1,78 +1,21 @@
 use std::rc::Rc;
 
-enum JsonValue {
-    Array(Vec<JsonValue>),
-    Number(i64),
-    String(String),
-    Object(Vec<(String, JsonValue)>),
-}
-
-impl Into<Document> for JsonValue {
-    fn into(self) -> Document {
-        match self {
-            JsonValue::Array(entries) => {
-                let mut entry_documents = Vec::new();
-                let entries_len = entries.len();
-
-                for (idx, entry) in entries.into_iter().enumerate() {
-                    entry_documents.push(Rc::new(entry.into()));
-
-                    if idx != entries_len - 1 {
-                        entry_documents.push(Rc::new(literal(",")));
-                        entry_documents.push(Rc::new(line_or_space()));
-                    }
-                }
-
-                let nested_entries = Document::Nest(2, Rc::new(Document::Concat(entry_documents)));
-
-                group(Document::Concat(vec![
-                    Rc::new(Document::Text("[".to_string())),
-                    Rc::new(line_or_empty()),
-                    Rc::new(nested_entries),
-                    Rc::new(line_or_empty()),
-                    Rc::new(Document::Text("]".to_string())),
-                ]))
-            }
-            JsonValue::Number(i) => Document::Text(i.to_string()),
-            JsonValue::String(s) => Document::Text(format!("\"{}\"", s)),
-            JsonValue::Object(fields) => {
-                let mut object_documents = Vec::new();
-                let fields_len = fields.len();
-                for (idx, (field_name, field_value)) in fields.into_iter().enumerate() {
-                    let mut field_documents = Vec::new();
-                    field_documents.push(Rc::new(text(field_name)));
-                    field_documents.push(Rc::new(literal(": ")));
-                    field_documents.push(Rc::new(field_value.into()));
-
-                    object_documents.push(Rc::new(group(Document::Concat(field_documents))));
-
-                    if idx != fields_len - 1 {
-                        object_documents.push(Rc::new(text(",".to_string())));
-                        object_documents.push(Rc::new(line_or_space()))
-                    }
-                }
-
-                group(Document::Concat(vec![
-                    Rc::new(literal("{")),
-                    Rc::new(line_or_empty()),
-                    Rc::new(nest(2, concat(object_documents))),
-                    Rc::new(line_or_empty()),
-                    Rc::new(literal("}")),
-                ]))
-            }
-        }
-    }
-}
+/// Type definitions for formatters
+///
+/// The main difference between this and Rome formatter is that we
+/// pre-emptively calculate the flattened version. This may not be
+/// better because Haskell is a lazy language and therefore it
+/// might not do it pre-emptively in the Haskell version
 
 #[derive(Debug, Clone)]
-enum Document {
+enum FormatElement {
     Empty,
-    Concat(Vec<Rc<Document>>),
-    Nest(usize, Rc<Document>),
-    Text(String),
+    List(Vec<Rc<FormatElement>>),
+    Indent(usize, Rc<FormatElement>),
+    Token(String),
     LineOrSpace,
     LineOrEmpty,
-    Union(Rc<Document>, Rc<Document>),
+    Union(Rc<FormatElement>, Rc<FormatElement>),
 }
 
 enum FittedDocument {
@@ -81,49 +24,53 @@ enum FittedDocument {
     Line(usize, Box<FittedDocument>),
 }
 
-fn empty() -> Document {
-    Document::Empty
+/// Helper functions for creating documents
+
+fn empty() -> FormatElement {
+    FormatElement::Empty
 }
 
-fn concat(docs: Vec<Rc<Document>>) -> Document {
-    Document::Concat(docs)
+fn concat(docs: Vec<Rc<FormatElement>>) -> FormatElement {
+    FormatElement::List(docs)
 }
 
-fn nest(indent: usize, x: Document) -> Document {
-    Document::Nest(indent, Rc::new(x))
+fn nest(indent: usize, x: FormatElement) -> FormatElement {
+    FormatElement::Indent(indent, Rc::new(x))
 }
 
-fn text(s: String) -> Document {
-    Document::Text(s)
+fn text(s: String) -> FormatElement {
+    FormatElement::Token(s)
 }
 
-fn literal(s: &'static str) -> Document {
-    Document::Text(s.to_string())
+fn literal(s: &'static str) -> FormatElement {
+    FormatElement::Token(s.to_string())
 }
 
-fn line_or_space() -> Document {
-    Document::LineOrSpace
+fn line_or_space() -> FormatElement {
+    FormatElement::LineOrSpace
 }
 
-fn line_or_empty() -> Document {
-    Document::LineOrEmpty
+fn line_or_empty() -> FormatElement {
+    FormatElement::LineOrEmpty
 }
 
-fn group(x: Document) -> Document {
+fn group(x: FormatElement) -> FormatElement {
     let x = Rc::new(x);
-    Document::Union(flatten(x.clone()), x.clone())
+    FormatElement::Union(flatten(x.clone()), x)
 }
 
-fn flatten(x: Rc<Document>) -> Rc<Document> {
+fn flatten(x: Rc<FormatElement>) -> Rc<FormatElement> {
     match &*x {
-        Document::Empty | Document::Text(_) => x.clone(),
-        Document::Concat(docs) => Rc::new(Document::Concat(
+        FormatElement::Empty | FormatElement::Token(_) => x.clone(),
+        FormatElement::List(docs) => Rc::new(FormatElement::List(
             docs.iter().map(|d| flatten(d.clone())).collect(),
         )),
-        Document::Nest(offset, x) => Rc::new(Document::Nest(*offset, flatten(x.clone()))),
-        Document::LineOrSpace => Rc::new(text(" ".to_string())),
-        Document::LineOrEmpty => Rc::new(empty()),
-        Document::Union(x, _) => flatten(x.clone()),
+        FormatElement::Indent(offset, x) => {
+            Rc::new(FormatElement::Indent(*offset, flatten(x.clone())))
+        }
+        FormatElement::LineOrSpace => Rc::new(text(" ".to_string())),
+        FormatElement::LineOrEmpty => Rc::new(empty()),
+        FormatElement::Union(x, _) => flatten(x.clone()),
     }
 }
 
@@ -140,40 +87,42 @@ fn print_fitted_document(x: FittedDocument) -> String {
     }
 }
 
-fn fit_document(width: usize, chars_placed: usize, x: Document) -> FittedDocument {
-    fit_documents(width, chars_placed, vec![(0, Rc::new(x))])
+fn fit_document(width: usize, chars_placed: usize, x: Rc<FormatElement>) -> FittedDocument {
+    fit_documents(width, chars_placed, vec![(0, x)])
 }
 
 fn fit_documents(
     width: usize,
     chars_placed: usize,
-    mut documents: Vec<(usize, Rc<Document>)>,
+    mut documents: Vec<(usize, Rc<FormatElement>)>,
 ) -> FittedDocument {
     if let Some((indent, doc)) = documents.pop() {
         match &*doc {
-            Document::Empty => fit_documents(width, chars_placed, documents),
-            Document::Concat(docs) => {
+            FormatElement::Empty => fit_documents(width, chars_placed, documents),
+            FormatElement::List(docs) => {
                 for doc in docs.iter().rev() {
                     documents.push((indent, doc.clone()));
                 }
 
                 fit_documents(width, chars_placed, documents)
             }
-            Document::Nest(offset, x) => {
+            FormatElement::Indent(offset, x) => {
                 documents.push((indent + offset, x.clone()));
                 fit_documents(width, chars_placed, documents)
             }
-            Document::Text(s) => {
+            FormatElement::Token(s) => {
                 let length = s.len();
                 FittedDocument::Text(
                     s.clone(),
                     Box::new(fit_documents(width, chars_placed + length, documents)),
                 )
             }
-            Document::LineOrSpace | Document::LineOrEmpty => {
+            FormatElement::LineOrSpace | FormatElement::LineOrEmpty => {
                 FittedDocument::Line(indent, Box::new(fit_documents(width, indent, documents)))
             }
-            Document::Union(x, y) => {
+            FormatElement::Union(x, y) => {
+                // NOTE: This is slow right now because we're cloning a vector of documents
+                // We'll make this less slow in the future with immutable vectors
                 let mut left_documents = documents.clone();
                 left_documents.push((indent, x.clone()));
                 let mut right_documents = documents;
@@ -219,37 +168,109 @@ impl FittedDocument {
     }
 }
 
-fn pretty(width: usize, x: Document) -> String {
+fn pretty(width: usize, x: Rc<FormatElement>) -> String {
     print_fitted_document(fit_document(width, 0, x))
 }
 
-fn main() {
-    let document: Document = JsonValue::Array(vec![
-        JsonValue::Number(10),
-        JsonValue::Number(100),
-        JsonValue::String("The Quick Brown Fox Jumps Over The Lazy Dog".to_string()),
-        JsonValue::Array(vec![JsonValue::Object(vec![
-            ("foo".to_string(), JsonValue::Number(20)),
-            ("bar".to_string(), JsonValue::Number(2000000)),
-            ("baz".to_string(), JsonValue::Number(2000000000000)),
-            ("fan".to_string(), JsonValue::Number(2000000000000)),
-            ("fab".to_string(), JsonValue::Number(2000000000000)),
-        ])]),
-    ])
-    .into();
+enum JsonValue {
+    Array(Vec<JsonValue>),
+    Number(i64),
+    String(String),
+    Object(Vec<(String, JsonValue)>),
+}
 
-    println!("{:#?}", document);
-    println!("{}", pretty(50, document,));
+impl From<JsonValue> for FormatElement {
+    fn from(value: JsonValue) -> Self {
+        match value {
+            JsonValue::Array(entries) => {
+                let mut entry_documents = Vec::new();
+                let entries_len = entries.len();
+
+                for (idx, entry) in entries.into_iter().enumerate() {
+                    if idx == 0 {
+                        entry_documents.push(Rc::new(line_or_empty()));
+                    }
+                    entry_documents.push(Rc::new(entry.into()));
+
+                    if idx != entries_len - 1 {
+                        entry_documents.push(Rc::new(literal(",")));
+                        entry_documents.push(Rc::new(line_or_space()));
+                    }
+                }
+
+                let nested_entries =
+                    FormatElement::Indent(2, Rc::new(FormatElement::List(entry_documents)));
+
+                group(FormatElement::List(vec![
+                    Rc::new(FormatElement::Token("[".to_string())),
+                    Rc::new(nested_entries),
+                    Rc::new(line_or_empty()),
+                    Rc::new(FormatElement::Token("]".to_string())),
+                ]))
+            }
+            JsonValue::Number(i) => FormatElement::Token(i.to_string()),
+            JsonValue::String(s) => FormatElement::Token(format!("\"{}\"", s)),
+            JsonValue::Object(fields) => {
+                let mut object_documents = Vec::new();
+                let fields_len = fields.len();
+                for (idx, (field_name, field_value)) in fields.into_iter().enumerate() {
+                    if idx == 0 {
+                        object_documents.push(Rc::new(line_or_empty()));
+                    }
+
+                    object_documents.push(Rc::new(text(field_name)));
+                    object_documents.push(Rc::new(literal(": ")));
+                    object_documents.push(Rc::new(field_value.into()));
+
+                    if idx != fields_len - 1 {
+                        object_documents.push(Rc::new(text(",".to_string())));
+                        object_documents.push(Rc::new(line_or_space()))
+                    }
+                }
+
+                group(FormatElement::List(vec![
+                    Rc::new(literal("{")),
+                    Rc::new(nest(2, concat(object_documents))),
+                    Rc::new(line_or_empty()),
+                    Rc::new(literal("}")),
+                ]))
+            }
+        }
+    }
+}
+
+fn main() {
+    let document: Rc<FormatElement> = Rc::new(
+        JsonValue::Array(vec![
+            JsonValue::Number(10),
+            JsonValue::Number(100),
+            JsonValue::String("The Quick Brown Fox Jumps Over The Lazy Dog".to_string()),
+            JsonValue::Object(vec![(
+                "foo".to_string(),
+                JsonValue::Array(vec![
+                    JsonValue::String("Chungking Express".to_string()),
+                    JsonValue::String("In the Mood for Love".to_string()),
+                    JsonValue::String("Badlands".to_string()),
+                ]),
+            )]),
+        ])
+        .into(),
+    );
+
+    println!("{}", pretty(50, document.clone()));
+    println!("{}", pretty(80, document.clone()));
+    println!("{}", pretty(100, document.clone()));
+    println!("{}", pretty(150, document.clone()));
 }
 
 #[test]
 fn raw_test() {
-    let doc = group(Document::Concat(vec![
-        Rc::new(Document::Text(
+    let doc = group(FormatElement::List(vec![
+        Rc::new(FormatElement::Token(
             "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ".to_string(),
         )),
-        Rc::new(Document::LineOrSpace),
-        Rc::new(Document::Text(
+        Rc::new(FormatElement::LineOrSpace),
+        Rc::new(FormatElement::Token(
             "11, 12, 13, 14, 15, 16, 17, 18, 19, 20]".to_string(),
         )),
     ]));
