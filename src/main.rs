@@ -168,7 +168,7 @@ impl FittedDocument {
     }
 }
 
-fn pretty(width: usize, x: Rc<FormatElement>) -> String {
+fn pretty_print_format_element(width: usize, x: Rc<FormatElement>) -> String {
     print_fitted_document(fit_document(width, 0, x))
 }
 
@@ -270,10 +270,10 @@ fn main() {
         .into(),
     );
 
-    println!("{}", pretty(50, document.clone()));
-    println!("{}", pretty(80, document.clone()));
-    println!("{}", pretty(100, document.clone()));
-    println!("{}", pretty(150, document.clone()));
+    println!("{}", pretty_print_format_element(50, document.clone()));
+    println!("{}", pretty_print_format_element(80, document.clone()));
+    println!("{}", pretty_print_format_element(100, document.clone()));
+    println!("{}", pretty_print_format_element(150, document.clone()));
 }
 
 #[test]
@@ -290,11 +290,11 @@ fn raw_test() {
 
     assert_eq!(
         "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]",
-        pretty(200, doc.clone())
+        pretty_print_format_element(200, doc.clone())
     );
 
     assert_eq!(
         "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, \n11, 12, 13, 14, 15, 16, 17, 18, 19, 20]",
-        pretty(50, doc)
+        pretty_print_format_element(50, doc)
     );
 }
